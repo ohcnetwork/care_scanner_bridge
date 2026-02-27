@@ -1,0 +1,32 @@
+# Binaries
+care-scanner-bridge
+care-scanner-bridge.exe
+care-scanner-bridge-*
+*.dmg
+*.AppImage
+*.msi
+
+# Build output
+dist/
+Output/
+
+# Dependencies
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test output
+coverage.out
+coverage.html
+
+# Local config (for testing)
+config.json

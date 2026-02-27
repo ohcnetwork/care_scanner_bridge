@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Care Scanner Bridge Test</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+        .status-indicator.connected {
+            background: #4caf50;
+        }
+        .status-indicator.disconnected {
+            background: #f44336;
+        }
+        button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #1976d2;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .scans {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background: #fafafa;
+        }
+        .scan-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-family: monospace;
+        }
+        .scan-item:last-child {
+            border-bottom: none;
+        }
+        .scan-time {
+            color: #666;
+            font-size: 12px;
+        }
+        .ports-list {
+            list-style: none;
+            padding: 0;
+        }
+        .ports-list li {
+            padding: 8px;
+            margin: 4px 0;
+            background: #f0f0f0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .ports-list li:hover {
+            background: #e0e0e0;
+        }
+        .ports-list li.connected {
+            background: #c8e6c9;
+        }
+        #log {
+            font-family: monospace;
+            font-size: 12px;
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔌 Care Scanner Bridge Test</h1>
+    
+    <div class="card">
+        <h2>Connection Status</h2>
+        <div class="status">
+            <div id="wsStatus" class="status-indicator disconnected"></div>
+            <span id="wsStatusText">WebSocket: Disconnected</span>
+        </div>
+        <div class="status" style="margin-top: 10px;">
+            <div id="scannerStatus" class="status-indicator disconnected"></div>
+            <span id="scannerStatusText">Scanner: Disconnected</span>
+        </div>
+        <div style="margin-top: 15px;">
+            <button id="connectBtn">Connect WebSocket</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Available Ports</h2>
+        <button id="refreshPorts">Refresh Ports</button>
+        <ul id="portsList" class="ports-list">
+            <li>Click "Refresh Ports" to scan</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Scanned Barcodes</h2>
+        <button id="clearScans">Clear</button>
+        <div id="scans" class="scans">
+            <div style="color: #666;">Waiting for scans...</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Debug Log</h2>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        const WS_URL = 'ws://localhost:7001/ws';
+
+        const elements = {
+            wsStatus: document.getElementById('wsStatus'),
+            wsStatusText: document.getElementById('wsStatusText'),
+            scannerStatus: document.getElementById('scannerStatus'),
+            scannerStatusText: document.getElementById('scannerStatusText'),
+            connectBtn: document.getElementById('connectBtn'),
+            disconnectBtn: document.getElementById('disconnectBtn'),
+            refreshPorts: document.getElementById('refreshPorts'),
+            portsList: document.getElementById('portsList'),
+            scans: document.getElementById('scans'),
+            clearScans: document.getElementById('clearScans'),
+            log: document.getElementById('log')
+        };
+
+        let scans = [];
+
+        function log(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${time}] ${message}`;
+            elements.log.appendChild(entry);
+            elements.log.scrollTop = elements.log.scrollHeight;
+        }
+
+        function updateWSStatus(connected) {
+            elements.wsStatus.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+            elements.wsStatusText.textContent = `WebSocket: ${connected ? 'Connected' : 'Disconnected'}`;
+            elements.connectBtn.disabled = connected;
+            elements.disconnectBtn.disabled = !connected;
+        }
+
+        function updateScannerStatus(status) {
+            const connected = status.connected;
+            elements.scannerStatus.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+            elements.scannerStatusText.textContent = `Scanner: ${connected ? `Connected (${status.currentPort})` : 'Disconnected'}`;
+        }
+
+        function connect() {
+            log('Connecting to WebSocket...');
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                log('WebSocket connected');
+                updateWSStatus(true);
+                send({ type: 'status' });
+                send({ type: 'list_ports' });
+            };
+
+            ws.onclose = () => {
+                log('WebSocket disconnected');
+                updateWSStatus(false);
+                updateScannerStatus({ connected: false });
+            };
+
+            ws.onerror = (error) => {
+                log(`WebSocket error: ${error.message || 'Unknown error'}`);
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function send(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+                log(`Sent: ${message.type}`);
+            }
+        }
+
+        function handleMessage(message) {
+            log(`Received: ${message.type}`);
+
+            switch (message.type) {
+                case 'status':
+                    updateScannerStatus(message.payload);
+                    break;
+
+                case 'ports':
+                    updatePortsList(message.payload);
+                    break;
+
+                case 'scan':
+                    addScan(message.payload);
+                    break;
+
+                case 'error':
+                    log(`Error: ${message.payload.message}`, 'error');
+                    break;
+
+                case 'pong':
+                    log('Pong received');
+                    break;
+            }
+        }
+
+        function updatePortsList(ports) {
+            if (!ports || ports.length === 0) {
+                elements.portsList.innerHTML = '<li>No ports found</li>';
+                return;
+            }
+
+            elements.portsList.innerHTML = ports.map(port => `
+                <li class="${port.isConnected ? 'connected' : ''}" data-port="${port.path}">
+                    ${port.path} - ${port.description} ${port.isConnected ? '(Connected)' : ''}
+                </li>
+            `).join('');
+
+            // Add click handlers
+            elements.portsList.querySelectorAll('li[data-port]').forEach(li => {
+                li.addEventListener('click', () => {
+                    const portPath = li.dataset.port;
+                    log(`Connecting to port: ${portPath}`);
+                    send({ type: 'connect', payload: { port: portPath, baudRate: 9600 } });
+                });
+            });
+        }
+
+        function addScan(scanData) {
+            scans.unshift(scanData);
+            if (scans.length > 50) scans.pop();
+
+            elements.scans.innerHTML = scans.map(scan => `
+                <div class="scan-item">
+                    <strong>${scan.barcode}</strong>
+                    <div class="scan-time">${new Date(scan.timestamp).toLocaleString()}</div>
+                </div>
+            `).join('');
+        }
+
+        // Event listeners
+        elements.connectBtn.addEventListener('click', connect);
+        elements.disconnectBtn.addEventListener('click', disconnect);
+        elements.refreshPorts.addEventListener('click', () => send({ type: 'list_ports' }));
+        elements.clearScans.addEventListener('click', () => {
+            scans = [];
+            elements.scans.innerHTML = '<div style="color: #666;">Waiting for scans...</div>';
+        });
+
+        // Auto-connect on page load
+        log('Page loaded. Click "Connect WebSocket" to start.');
+    </script>
+</body>
+</html>
