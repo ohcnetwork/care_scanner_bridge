@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"bufio"
 	"log"
 	"strings"
 	"sync"
@@ -136,6 +135,17 @@ func (m *Manager) GetCurrentPort() string {
 	return m.currentPort
 }
 
+// SimulateScan simulates a barcode scan event (for testing)
+func (m *Manager) SimulateScan(barcode string) {
+	event := ScanEvent{
+		Barcode:   barcode,
+		Port:      "test",
+		Timestamp: time.Now(),
+	}
+	log.Printf("Simulating scan: %s", barcode)
+	m.notifyListeners(event)
+}
+
 // Subscribe adds a listener for scan events
 func (m *Manager) Subscribe() chan ScanEvent {
 	m.mu.Lock()
@@ -161,35 +171,59 @@ func (m *Manager) Unsubscribe(ch chan ScanEvent) {
 }
 
 func (m *Manager) readLoop() {
-	reader := bufio.NewReader(m.port)
+	log.Printf("Starting read loop for port %s", m.currentPort)
+	
+	buf := make([]byte, 1024)
+	var dataBuffer strings.Builder
 
 	for {
 		select {
 		case <-m.stopChan:
+			log.Printf("Read loop stopped")
 			return
 		default:
 			// Set read timeout
-			m.port.SetReadTimeout(100 * time.Millisecond)
+			m.port.SetReadTimeout(200 * time.Millisecond)
 			
-			line, err := reader.ReadString('\n')
+			n, err := m.port.Read(buf)
 			if err != nil {
 				// Timeout or temporary error, continue
 				continue
 			}
+			
+			if n > 0 {
+				chunk := string(buf[:n])
+				log.Printf("Raw data received (%d bytes): %q", n, chunk)
+				dataBuffer.WriteString(chunk)
+				
+				// Check if we have a complete scan (ends with \r, \n, or \r\n)
+				data := dataBuffer.String()
+				if strings.ContainsAny(data, "\r\n") {
+					// Split by common line endings
+					lines := strings.FieldsFunc(data, func(r rune) bool {
+						return r == '\r' || r == '\n'
+					})
+					
+					for _, line := range lines {
+						barcode := strings.TrimSpace(line)
+						if barcode == "" {
+							continue
+						}
 
-			barcode := strings.TrimSpace(line)
-			if barcode == "" {
-				continue
+						event := ScanEvent{
+							Barcode:   barcode,
+							Port:      m.currentPort,
+							Timestamp: time.Now(),
+						}
+
+						log.Printf("Scanned: %s", barcode)
+						m.notifyListeners(event)
+					}
+					
+					// Clear buffer after processing
+					dataBuffer.Reset()
+				}
 			}
-
-			event := ScanEvent{
-				Barcode:   barcode,
-				Port:      m.currentPort,
-				Timestamp: time.Now(),
-			}
-
-			log.Printf("Scanned: %s", barcode)
-			m.notifyListeners(event)
 		}
 	}
 }

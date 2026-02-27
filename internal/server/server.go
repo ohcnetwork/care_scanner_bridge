@@ -75,6 +75,8 @@ func (s *WebSocketServer) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/test-scan", s.handleTestScan)
+	mux.HandleFunc("/", s.handleTestPage)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
@@ -82,6 +84,7 @@ func (s *WebSocketServer) Start() error {
 	}
 
 	log.Printf("WebSocket server starting on port %d", s.port)
+	log.Printf("Open http://localhost:%d in your browser to test", s.port)
 	return s.server.ListenAndServe()
 }
 
@@ -115,6 +118,30 @@ func (s *WebSocketServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *WebSocketServer) handleTestScan(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	
+	barcode := r.URL.Query().Get("barcode")
+	if barcode == "" {
+		barcode = "TEST-BARCODE-12345"
+	}
+	
+	// Simulate a scan event
+	s.scanner.SimulateScan(barcode)
+	
+	log.Printf("Test scan simulated: %s", barcode)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"barcode": barcode,
+	})
+}
+
+func (s *WebSocketServer) handleTestPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	http.ServeFile(w, r, "test.html")
+}
+
 func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -138,7 +165,8 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 	// Send scan events to this client
 	go func() {
 		for event := range scanChan {
-			s.sendMessage(conn, Message{
+			log.Printf("Sending scan event to client: %s", event.Barcode)
+			err := s.sendMessage(conn, Message{
 				Type: MsgTypeScan,
 				Payload: map[string]interface{}{
 					"barcode":   event.Barcode,
@@ -146,6 +174,10 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 					"timestamp": event.Timestamp,
 				},
 			})
+			if err != nil {
+				log.Printf("Failed to send scan event: %v", err)
+				return
+			}
 		}
 	}()
 
@@ -269,14 +301,16 @@ func (s *WebSocketServer) broadcastStatus() {
 	}
 }
 
-func (s *WebSocketServer) sendMessage(conn *websocket.Conn, msg Message) {
+func (s *WebSocketServer) sendMessage(conn *websocket.Conn, msg Message) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("JSON marshal error: %v", err)
-		return
+		return err
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		log.Printf("Write error: %v", err)
+		return err
 	}
+	return nil
 }
