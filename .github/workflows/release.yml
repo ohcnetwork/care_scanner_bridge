@@ -149,13 +149,19 @@ jobs:
           name: care-scanner-bridge-linux-amd64
           path: ./dist
 
+      - name: Install FUSE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse libfuse2
+
       - name: Create AppImage
         run: |
           chmod +x ./dist/care-scanner-bridge-linux-amd64
           
-          # Download appimagetool
+          # Download appimagetool and extract it (to avoid FUSE requirement)
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
           
           # Create AppDir structure
           mkdir -p AppDir/usr/bin
@@ -177,8 +183,8 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
-          # Build AppImage
-          ./appimagetool-x86_64.AppImage AppDir care-scanner-bridge-linux.AppImage
+          # Build AppImage using extracted appimagetool
+          ./squashfs-root/AppRun AppDir care-scanner-bridge-linux.AppImage
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
