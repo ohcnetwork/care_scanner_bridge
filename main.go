@@ -22,6 +22,9 @@ import (
 //go:embed assets/*
 var assets embed.FS
 
+//go:embed test.html
+var testHTML []byte
+
 // Version info (set during build)
 var version = "dev"
 
@@ -62,7 +65,7 @@ func main() {
 	scannerManager := scanner.NewManager()
 
 	// Create WebSocket server
-	wsServer := server.NewWebSocketServer(cfg.Port, scannerManager)
+	wsServer := server.NewWebSocketServer(cfg.Port, scannerManager, testHTML)
 
 	// Start WebSocket server in background
 	go func() {

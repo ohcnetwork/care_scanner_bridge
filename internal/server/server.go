@@ -59,14 +59,16 @@ type WebSocketServer struct {
 	mu             sync.RWMutex
 	server         *http.Server
 	clientCount    int
+	testHTML       []byte
 }
 
 // NewWebSocketServer creates a new WebSocket server
-func NewWebSocketServer(port int, scannerMgr *scanner.Manager) *WebSocketServer {
+func NewWebSocketServer(port int, scannerMgr *scanner.Manager, testHTML []byte) *WebSocketServer {
 	return &WebSocketServer{
-		port:    port,
-		scanner: scannerMgr,
-		clients: make(map[*websocket.Conn]bool),
+		port:     port,
+		scanner:  scannerMgr,
+		clients:  make(map[*websocket.Conn]bool),
+		testHTML: testHTML,
 	}
 }
 
@@ -138,8 +140,12 @@ func (s *WebSocketServer) handleTestScan(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *WebSocketServer) handleTestPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html")
-	http.ServeFile(w, r, "test.html")
+	w.Write(s.testHTML)
 }
 
 func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
