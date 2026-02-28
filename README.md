@@ -14,16 +14,27 @@ A lightweight, cross-platform desktop application that bridges serial barcode sc
 ## Installation
 
 ### macOS
+
 1. Download `care-scanner-bridge-macos.dmg` from [Releases](https://github.com/ohcnetwork/care_scanner_bridge/releases)
 2. Open the DMG and drag "Care Scanner Bridge" to Applications
-3. Launch from Applications (you may need to right-click → Open the first time)
+3. **First launch (Important - the app is not notarized):**
+   - **Option A:** Right-click on the app in Applications → Select "Open" → Click "Open" in the dialog
+   - **Option B:** If you see "not responding" or it won't open, run this command in Terminal:
+
+     ```bash
+     xattr -cr /Applications/Care\ Scanner\ Bridge.app && open /Applications/Care\ Scanner\ Bridge.app
+     ```
+
+   - **Option C:** Go to System Settings → Privacy & Security → Scroll down and click "Open Anyway"
 
 ### Windows
+
 1. Download `care-scanner-bridge-setup.exe` from [Releases](https://github.com/ohcnetwork/care_scanner_bridge/releases)
-2. Run the installer
+2. Run the installer (click "More info" → "Run anyway" if Windows SmartScreen appears)
 3. Launch from Start Menu or Desktop shortcut
 
 ### Linux
+
 1. Download `care-scanner-bridge-linux.AppImage` from [Releases](https://github.com/ohcnetwork/care_scanner_bridge/releases)
 2. Make it executable: `chmod +x care-scanner-bridge-linux.AppImage`
 3. Run: `./care-scanner-bridge-linux.AppImage`

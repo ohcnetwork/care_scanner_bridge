@@ -101,10 +101,30 @@ jobs:
           cp ./dist/care-scanner-bridge "./Care Scanner Bridge.app/Contents/MacOS/"
           cp build/darwin/Info.plist "./Care Scanner Bridge.app/Contents/"
           cp build/darwin/icon.icns "./Care Scanner Bridge.app/Contents/Resources/" || true
+          
+          # Make the binary executable
+          chmod +x "./Care Scanner Bridge.app/Contents/MacOS/care-scanner-bridge"
+          
+          # Remove any quarantine attributes
+          xattr -cr "./Care Scanner Bridge.app" || true
+          
+          # Ad-hoc sign the app (allows it to run without Apple Developer certificate)
+          codesign --force --deep --sign - "./Care Scanner Bridge.app"
+          
+          # Verify the signature
+          codesign --verify --verbose "./Care Scanner Bridge.app" || true
 
       - name: Create DMG
         run: |
-          hdiutil create -volname "Care Scanner Bridge" -srcfolder "./Care Scanner Bridge.app" -ov -format UDZO care-scanner-bridge-macos.dmg
+          # Create a temporary directory for DMG contents
+          mkdir -p dmg_contents
+          cp -R "./Care Scanner Bridge.app" dmg_contents/
+          
+          # Create symbolic link to Applications folder
+          ln -s /Applications dmg_contents/Applications
+          
+          # Create DMG
+          hdiutil create -volname "Care Scanner Bridge" -srcfolder dmg_contents -ov -format UDZO care-scanner-bridge-macos.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
