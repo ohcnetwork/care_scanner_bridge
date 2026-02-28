@@ -141,7 +141,6 @@
     <div class="card">
         <h2>Scanned Barcodes</h2>
         <button id="clearScans">Clear</button>
-        <button id="testScan">Test Scan (Simulate)</button>
         <div id="scans" class="scans">
             <div style="color: #666;">Waiting for scans...</div>
         </div>
@@ -167,7 +166,6 @@
             portsList: document.getElementById('portsList'),
             scans: document.getElementById('scans'),
             clearScans: document.getElementById('clearScans'),
-            testScan: document.getElementById('testScan'),
             log: document.getElementById('log')
         };
 
@@ -237,7 +235,7 @@
         }
 
         function handleMessage(message) {
-            log(`Received: ${message.type} - ${JSON.stringify(message.payload)}`);
+            log(`Received: ${message.type}`);
 
             switch (message.type) {
                 case 'status':
@@ -249,7 +247,6 @@
                     break;
 
                 case 'scan':
-                    log(`Scan data: ${JSON.stringify(message.payload)}`);
                     addScan(message.payload);
                     break;
 
@@ -286,30 +283,15 @@
         }
 
         function addScan(scanData) {
-            if (!scanData || !scanData.barcode) {
-                log('Invalid scan data received');
-                return;
-            }
             scans.unshift(scanData);
             if (scans.length > 50) scans.pop();
 
             elements.scans.innerHTML = scans.map(scan => `
                 <div class="scan-item">
-                    <strong>${scan.barcode || 'Unknown'}</strong>
-                    <div class="scan-time">${scan.timestamp ? new Date(scan.timestamp).toLocaleString() : 'No timestamp'}</div>
+                    <strong>${scan.barcode}</strong>
+                    <div class="scan-time">${new Date(scan.timestamp).toLocaleString()}</div>
                 </div>
             `).join('');
-        }
-
-        async function testScan() {
-            log('Triggering test scan...');
-            try {
-                const response = await fetch('http://localhost:7001/test-scan?barcode=TEST-' + Date.now());
-                const data = await response.json();
-                log(`Test scan triggered: ${data.barcode}`);
-            } catch (err) {
-                log(`Test scan failed: ${err.message}`);
-            }
         }
 
         // Event listeners
@@ -320,7 +302,6 @@
             scans = [];
             elements.scans.innerHTML = '<div style="color: #666;">Waiting for scans...</div>';
         });
-        elements.testScan.addEventListener('click', testScan);
 
         // Auto-connect on page load
         log('Page loaded. Click "Connect WebSocket" to start.');
