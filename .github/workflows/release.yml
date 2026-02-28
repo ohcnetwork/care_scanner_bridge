@@ -59,6 +59,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
+        shell: bash
         run: |
           VERSION=${GITHUB_REF_NAME:-dev}
           go build -ldflags="-s -w -X main.version=${VERSION}" -o ${{ matrix.artifact }} .
