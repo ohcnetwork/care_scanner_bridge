@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -21,7 +22,23 @@ import (
 //go:embed assets/*
 var assets embed.FS
 
+// Version info (set during build)
+var version = "dev"
+
 func main() {
+	// Parse command line flags
+	headless := flag.Bool("headless", false, "Run without system tray (server only)")
+	showVersion := flag.Bool("version", false, "Show version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("Care Scanner Bridge version:", version)
+		os.Exit(0)
+	}
+
+	// On macOS, systray requires the main goroutine to be locked to the main thread
+	runtime.LockOSThread()
+
 	// Load configuration
 	cfg := config.Load()
 
@@ -48,22 +65,18 @@ func main() {
 	wsServer := server.NewWebSocketServer(cfg.Port, scannerManager)
 
 	// Start WebSocket server in background
-	serverStarted := make(chan bool, 1)
 	go func() {
 		// Small delay to let tray initialize first
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
+		log.Printf("Starting WebSocket server on port %d...", cfg.Port)
 		if err := wsServer.Start(); err != nil {
-			log.Printf("Failed to start WebSocket server: %v", err)
-			showNotification("Care Scanner Bridge", fmt.Sprintf("Failed to start server: %v", err))
-			serverStarted <- false
-			return
+			log.Printf("WebSocket server error: %v", err)
 		}
-		serverStarted <- true
 	}()
 
-	// Show startup notification
+	// Show startup notification after a short delay
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 		showNotification("Care Scanner Bridge", fmt.Sprintf("Running on port %d. Look for the icon in your menu bar.", cfg.Port))
 	}()
 
@@ -71,13 +84,32 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start system tray (blocks on macOS/Windows)
-	go tray.Run(assets, wsServer, scannerManager, cfg)
+	// Check if we should disable tray (for debugging or headless operation)
+	// Can be set via command line flag (-headless) or environment variable (DISABLE_TRAY=1)
+	disableTray := *headless || os.Getenv("DISABLE_TRAY") == "1"
 
-	// Wait for shutdown signal
-	<-sigChan
-	log.Println("Shutting down...")
-	wsServer.Stop()
+	if disableTray {
+		log.Println("System tray disabled, running in headless mode")
+		showNotification("Care Scanner Bridge", fmt.Sprintf("Running in headless mode on port %d", cfg.Port))
+		
+		// Block on signal in headless mode
+		<-sigChan
+		log.Println("Shutting down...")
+		wsServer.Stop()
+		os.Exit(0)
+	} else {
+		// Handle quit from tray
+		go func() {
+			<-sigChan
+			log.Println("Shutting down...")
+			wsServer.Stop()
+			os.Exit(0)
+		}()
+
+		// Start system tray (this blocks on macOS - MUST be called from main thread)
+		log.Println("Starting system tray...")
+		tray.Run(assets, wsServer, scannerManager, cfg)
+	}
 }
 
 // isPortInUse checks if a port is already in use

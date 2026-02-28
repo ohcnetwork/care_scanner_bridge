@@ -60,7 +60,8 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
         run: |
-          go build -ldflags="-s -w" -o ${{ matrix.artifact }} .
+          VERSION=${GITHUB_REF_NAME:-dev}
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o ${{ matrix.artifact }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -108,11 +109,12 @@ jobs:
           # Remove any quarantine attributes
           xattr -cr "./Care Scanner Bridge.app" || true
           
-          # Ad-hoc sign the app (allows it to run without Apple Developer certificate)
-          codesign --force --deep --sign - "./Care Scanner Bridge.app"
+          # Ad-hoc sign the app with entitlements
+          # Note: Without --options runtime to avoid notarization requirement
+          codesign --force --deep --sign - --entitlements build/darwin/entitlements.plist "./Care Scanner Bridge.app"
           
           # Verify the signature
-          codesign --verify --verbose "./Care Scanner Bridge.app" || true
+          codesign --verify --verbose "./Care Scanner Bridge.app" || echo "Warning: Signature verification failed, but continuing..."
 
       - name: Create DMG
         run: |
