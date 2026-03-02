@@ -4,10 +4,11 @@ A lightweight, cross-platform desktop application that bridges serial barcode sc
 
 ## Features
 
-- 🖥️ **Cross-platform**: Works on macOS, Windows, and Linux
+- 🖥️ **Cross-platform**: Works on macOS and Windows (Linux coming soon)
 - 🔌 **Plug & Play**: Auto-detects serial barcode scanners
 - 🌐 **WebSocket Server**: Exposes scanner data to web apps on `localhost:7001`
 - 📡 **System Tray**: Runs silently in the background
+- 🔗 **Device Pairing**: Remembers your scanner and auto-connects on startup
 - ⚡ **Lightweight**: Single binary, no dependencies (~10MB)
 - 🔒 **Secure**: Only accepts connections from localhost
 
@@ -35,9 +36,13 @@ A lightweight, cross-platform desktop application that bridges serial barcode sc
 
 ### Linux
 
+🚧 **Coming Soon** - Linux support is under development.
+
+<!-- 
 1. Download `care-scanner-bridge-linux.AppImage` from [Releases](https://github.com/ohcnetwork/care_scanner_bridge/releases)
 2. Make it executable: `chmod +x care-scanner-bridge-linux.AppImage`
 3. Run: `./care-scanner-bridge-linux.AppImage`
+-->
 
 ## Usage
 

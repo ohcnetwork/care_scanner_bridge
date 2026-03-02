@@ -23,14 +23,14 @@ var (
 	scannerManager *scanner.Manager
 	cfg            *config.Config
 
-	mStatus        *systray.MenuItem
-	mPairedDevice  *systray.MenuItem
-	mConnect       *systray.MenuItem
-	mDisconnect    *systray.MenuItem
-	mForget        *systray.MenuItem
-	mPortsMenu     *systray.MenuItem
-	mStartAtLogin  *systray.MenuItem
-	portItems      []*systray.MenuItem
+	mStatus       *systray.MenuItem
+	mPairedDevice *systray.MenuItem
+	mConnect      *systray.MenuItem
+	mDisconnect   *systray.MenuItem
+	mForget       *systray.MenuItem
+	mPortsMenu    *systray.MenuItem
+	mStartAtLogin *systray.MenuItem
+	portItems     []*systray.MenuItem
 
 	stopReconnect chan struct{}
 )
@@ -54,7 +54,11 @@ func onReady() {
 		systray.SetIcon(iconData)
 	}
 
-	systray.SetTitle("Care Scanner")
+	// On macOS, don't show title in menu bar (icon only)
+	// On other platforms, show the title
+	if runtime.GOOS != "darwin" {
+		systray.SetTitle("Care Scanner")
+	}
 	systray.SetTooltip("Care Scanner Bridge - Serial Barcode Scanner")
 
 	// Status (non-clickable)
@@ -199,6 +203,21 @@ func autoConnectWithRetry() {
 	log.Printf("Failed to auto-connect after %d attempts", maxRetries)
 }
 
+// formatDeviceName extracts a friendly device name from a full path
+// e.g., "/dev/cu.usbmodem00000000050C1" -> "usbmodem00000000050C1"
+func formatDeviceName(path string) string {
+	name := path
+	// Remove common prefixes to show just the device name
+	prefixes := []string{"/dev/cu.", "/dev/tty.", "/dev/", "COM"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(name, prefix) {
+			name = strings.TrimPrefix(name, prefix)
+			break
+		}
+	}
+	return name
+}
+
 // updatePairedDeviceDisplay updates the paired device menu item
 func updatePairedDeviceDisplay() {
 	if mPairedDevice == nil {
@@ -206,12 +225,9 @@ func updatePairedDeviceDisplay() {
 	}
 
 	if cfg.LastDevice != "" {
-		// Show shortened device name
-		deviceName := cfg.LastDevice
-		if len(deviceName) > 30 {
-			deviceName = "..." + deviceName[len(deviceName)-27:]
-		}
-		mPairedDevice.SetTitle(fmt.Sprintf("📱 Paired: %s", deviceName))
+		// Show friendly device name
+		deviceName := formatDeviceName(cfg.LastDevice)
+		mPairedDevice.SetTitle(fmt.Sprintf("Paired: %s", deviceName))
 		if mForget != nil {
 			mForget.Enable()
 		}
@@ -261,9 +277,9 @@ func refreshPorts() {
 
 	// Add port items
 	for _, port := range ports {
-		displayName := port.Path
+		displayName := formatDeviceName(port.Path)
 		if port.Description != "" {
-			displayName = fmt.Sprintf("%s - %s", port.Path, port.Description)
+			displayName = fmt.Sprintf("%s - %s", displayName, port.Description)
 		}
 
 		// Show indicators for paired and connected status
@@ -271,10 +287,10 @@ func refreshPorts() {
 		if port.IsConnected {
 			displayName = "✓ " + displayName + " (connected)"
 		} else if isPaired {
-			displayName = "📱 " + displayName + " (paired)"
+			displayName = "🔗 " + displayName + " (paired)"
 		}
 
-		item := mPortsMenu.AddSubMenuItem(displayName, fmt.Sprintf("Connect to %s", port.Path))
+		item := mPortsMenu.AddSubMenuItem(displayName, fmt.Sprintf("Connect to %s", formatDeviceName(port.Path)))
 		portItems = append(portItems, item)
 
 		// Handle port selection in a separate goroutine
