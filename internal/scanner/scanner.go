@@ -110,18 +110,18 @@ func (m *Manager) Disconnect() error {
 	if m.port != nil {
 		// Mark as disconnected first
 		m.isConnected = false
-		
+
 		// Close the port (this will cause Read to fail)
 		err := m.port.Close()
 		m.port = nil
 		m.currentPort = ""
-		
+
 		// Then stop the read loop
 		if m.stopChan != nil {
 			close(m.stopChan)
 			m.stopChan = nil
 		}
-		
+
 		log.Println("Disconnected from scanner")
 		return err
 	}
@@ -221,20 +221,12 @@ func (m *Manager) readLoop() {
 				log.Printf("Raw data received (%d bytes): %q", n, chunk)
 				dataBuffer.WriteString(chunk)
 
-				// Check if we have a complete scan (ends with \r, \n, or \r\n)
+				// Check if we have complete data (ends with \r or \n)
 				data := dataBuffer.String()
-				if strings.ContainsAny(data, "\r\n") {
-					// Split by common line endings
-					lines := strings.FieldsFunc(data, func(r rune) bool {
-						return r == '\r' || r == '\n'
-					})
-
-					for _, line := range lines {
-						barcode := strings.TrimSpace(line)
-						if barcode == "" {
-							continue
-						}
-
+				if strings.HasSuffix(data, "\r") || strings.HasSuffix(data, "\n") {
+					// We have complete data, send it
+					barcode := strings.TrimRight(data, "\r\n")
+					if barcode != "" {
 						event := ScanEvent{
 							Barcode:   barcode,
 							Port:      m.currentPort,
@@ -244,8 +236,7 @@ func (m *Manager) readLoop() {
 						log.Printf("Scanned: %s", barcode)
 						m.notifyListeners(event)
 					}
-
-					// Clear buffer after processing
+					// Clear the buffer
 					dataBuffer.Reset()
 				}
 			}
