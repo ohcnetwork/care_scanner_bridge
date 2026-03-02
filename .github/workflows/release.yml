@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
             artifact: care-scanner-bridge-windows-amd64.exe
 
     runs-on: ${{ matrix.os }}
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: "1.21"
 
       # Linux dependencies (commented out since Linux build is disabled)
       # - name: Install Linux dependencies
@@ -73,7 +73,7 @@ jobs:
   create-macos-dmg:
     needs: build
     runs-on: macos-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -103,17 +103,17 @@ jobs:
           cp ./dist/care-scanner-bridge "./Care Scanner Bridge.app/Contents/MacOS/"
           cp build/darwin/Info.plist "./Care Scanner Bridge.app/Contents/"
           cp build/darwin/icon.icns "./Care Scanner Bridge.app/Contents/Resources/" || true
-          
+
           # Make the binary executable
           chmod +x "./Care Scanner Bridge.app/Contents/MacOS/care-scanner-bridge"
-          
+
           # Remove any quarantine attributes
           xattr -cr "./Care Scanner Bridge.app" || true
-          
+
           # Ad-hoc sign the app with entitlements
           # Note: Without --options runtime to avoid notarization requirement
           codesign --force --deep --sign - --entitlements build/darwin/entitlements.plist "./Care Scanner Bridge.app"
-          
+
           # Verify the signature
           codesign --verify --verbose "./Care Scanner Bridge.app" || echo "Warning: Signature verification failed, but continuing..."
 
@@ -122,12 +122,35 @@ jobs:
           # Create a temporary directory for DMG contents
           mkdir -p dmg_contents
           cp -R "./Care Scanner Bridge.app" dmg_contents/
-          
+
           # Create symbolic link to Applications folder
           ln -s /Applications dmg_contents/Applications
           
-          # Create DMG
-          hdiutil create -volname "Care Scanner Bridge" -srcfolder dmg_contents -ov -format UDZO care-scanner-bridge-macos.dmg
+          # Create a README for first-time users
+          cat > dmg_contents/README.txt << 'EOF'
+          Care Scanner Bridge - Installation Instructions
+          ===============================================
+          
+          1. Drag "Care Scanner Bridge" to the Applications folder
+          2. Open the app from Applications
+          3. If you see "app cannot be opened" message:
+             - Right-click the app → Open → Click "Open" in the dialog
+             - OR: Go to System Settings → Privacy & Security → Click "Open Anyway"
+          4. The app will appear in your menu bar (top right)
+          5. Click the icon to select your scanner device
+          
+          The app remembers your scanner and connects automatically on startup.
+          Use "Start at Login" option in the menu to launch automatically.
+          
+          For support: https://github.com/ohcnetwork/care_scanner_bridge
+          EOF
+
+          # Create DMG with custom settings
+          hdiutil create -volname "Care Scanner Bridge" \
+            -srcfolder dmg_contents \
+            -ov -format UDZO \
+            -fs HFS+ \
+            care-scanner-bridge-macos.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
@@ -138,7 +161,7 @@ jobs:
   create-windows-installer:
     needs: build
     runs-on: windows-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -163,7 +186,7 @@ jobs:
   # create-linux-appimage:
   #   needs: build
   #   runs-on: ubuntu-latest
-  #   
+  #
   #   steps:
   #     - name: Checkout code
   #       uses: actions/checkout@v4
@@ -182,23 +205,23 @@ jobs:
   #     - name: Create AppImage
   #       run: |
   #         chmod +x ./dist/care-scanner-bridge-linux-amd64
-  #         
+  #
   #         # Download appimagetool and extract it (to avoid FUSE requirement)
   #         wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
   #         chmod +x appimagetool-x86_64.AppImage
   #         ./appimagetool-x86_64.AppImage --appimage-extract
-  #         
+  #
   #         # Create AppDir structure
   #         mkdir -p AppDir/usr/bin
   #         mkdir -p AppDir/usr/share/applications
   #         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-  #         
+  #
   #         cp ./dist/care-scanner-bridge-linux-amd64 AppDir/usr/bin/care-scanner-bridge
   #         cp build/linux/care-scanner-bridge.desktop AppDir/usr/share/applications/
   #         cp build/linux/care-scanner-bridge.desktop AppDir/
   #         cp build/linux/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/care-scanner-bridge.png || true
   #         cp build/linux/icon.png AppDir/care-scanner-bridge.png || true
-  #         
+  #
   #         # Create AppRun
   #         cat > AppDir/AppRun << 'EOF'
   #         #!/bin/bash
@@ -207,7 +230,7 @@ jobs:
   #         exec "${HERE}/usr/bin/care-scanner-bridge" "$@"
   #         EOF
   #         chmod +x AppDir/AppRun
-  #         
+  #
   #         # Build AppImage using extracted appimagetool
   #         ./squashfs-root/AppRun AppDir care-scanner-bridge-linux.AppImage
   #
@@ -221,7 +244,7 @@ jobs:
     needs: [create-macos-dmg, create-windows-installer]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    
+
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

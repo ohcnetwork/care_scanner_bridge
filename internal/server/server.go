@@ -53,13 +53,13 @@ type StatusPayload struct {
 
 // WebSocketServer handles WebSocket connections
 type WebSocketServer struct {
-	port           int
-	scanner        *scanner.Manager
-	clients        map[*websocket.Conn]bool
-	mu             sync.RWMutex
-	server         *http.Server
-	clientCount    int
-	testHTML       []byte
+	port        int
+	scanner     *scanner.Manager
+	clients     map[*websocket.Conn]bool
+	mu          sync.RWMutex
+	server      *http.Server
+	clientCount int
+	testHTML    []byte
 }
 
 // NewWebSocketServer creates a new WebSocket server
@@ -123,15 +123,15 @@ func (s *WebSocketServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *WebSocketServer) handleTestScan(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	
+
 	barcode := r.URL.Query().Get("barcode")
 	if barcode == "" {
 		barcode = "TEST-BARCODE-12345"
 	}
-	
+
 	// Simulate a scan event
 	s.scanner.SimulateScan(barcode)
-	
+
 	log.Printf("Test scan simulated: %s", barcode)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "ok",

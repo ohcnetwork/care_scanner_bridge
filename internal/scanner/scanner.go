@@ -108,14 +108,21 @@ func (m *Manager) Disconnect() error {
 	defer m.mu.Unlock()
 
 	if m.port != nil {
+		// Mark as disconnected first
+		m.isConnected = false
+		
+		// Close the port (this will cause Read to fail)
+		err := m.port.Close()
+		m.port = nil
+		m.currentPort = ""
+		
+		// Then stop the read loop
 		if m.stopChan != nil {
 			close(m.stopChan)
 			m.stopChan = nil
 		}
-		err := m.port.Close()
-		m.port = nil
-		m.isConnected = false
-		m.currentPort = ""
+		
+		log.Println("Disconnected from scanner")
 		return err
 	}
 	return nil
@@ -150,7 +157,7 @@ func (m *Manager) SimulateScan(barcode string) {
 func (m *Manager) Subscribe() chan ScanEvent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	ch := make(chan ScanEvent, 10)
 	m.scanListeners = append(m.scanListeners, ch)
 	return ch
@@ -172,7 +179,7 @@ func (m *Manager) Unsubscribe(ch chan ScanEvent) {
 
 func (m *Manager) readLoop() {
 	log.Printf("Starting read loop for port %s", m.currentPort)
-	
+
 	buf := make([]byte, 1024)
 	var dataBuffer strings.Builder
 
@@ -182,20 +189,38 @@ func (m *Manager) readLoop() {
 			log.Printf("Read loop stopped")
 			return
 		default:
+			// Check if port is still valid
+			m.mu.RLock()
+			port := m.port
+			m.mu.RUnlock()
+
+			if port == nil {
+				log.Printf("Port closed, stopping read loop")
+				return
+			}
+
 			// Set read timeout
-			m.port.SetReadTimeout(200 * time.Millisecond)
-			
-			n, err := m.port.Read(buf)
+			port.SetReadTimeout(200 * time.Millisecond)
+
+			n, err := port.Read(buf)
 			if err != nil {
+				// Check if we're disconnected
+				m.mu.RLock()
+				connected := m.isConnected
+				m.mu.RUnlock()
+				if !connected {
+					log.Printf("Disconnected, stopping read loop")
+					return
+				}
 				// Timeout or temporary error, continue
 				continue
 			}
-			
+
 			if n > 0 {
 				chunk := string(buf[:n])
 				log.Printf("Raw data received (%d bytes): %q", n, chunk)
 				dataBuffer.WriteString(chunk)
-				
+
 				// Check if we have a complete scan (ends with \r, \n, or \r\n)
 				data := dataBuffer.String()
 				if strings.ContainsAny(data, "\r\n") {
@@ -203,7 +228,7 @@ func (m *Manager) readLoop() {
 					lines := strings.FieldsFunc(data, func(r rune) bool {
 						return r == '\r' || r == '\n'
 					})
-					
+
 					for _, line := range lines {
 						barcode := strings.TrimSpace(line)
 						if barcode == "" {
@@ -219,7 +244,7 @@ func (m *Manager) readLoop() {
 						log.Printf("Scanned: %s", barcode)
 						m.notifyListeners(event)
 					}
-					
+
 					// Clear buffer after processing
 					dataBuffer.Reset()
 				}
@@ -243,13 +268,20 @@ func (m *Manager) notifyListeners(event ScanEvent) {
 
 func isLikelyScannerPort(port string) bool {
 	// On macOS, USB serial devices typically appear as /dev/cu.usbserial-* or /dev/cu.usbmodem-*
+	// Also /dev/tty.* but we prefer /dev/cu.* (cu = calling unit, tty = terminal)
+	// Skip /dev/tty.* to avoid duplicates on macOS
+	if strings.HasPrefix(port, "/dev/tty.") {
+		return false
+	}
+
 	// On Linux, they appear as /dev/ttyUSB* or /dev/ttyACM*
 	// On Windows, they appear as COM*
 	lowerPort := strings.ToLower(port)
 	return strings.Contains(lowerPort, "usb") ||
 		strings.Contains(lowerPort, "acm") ||
 		strings.Contains(lowerPort, "com") ||
-		strings.Contains(lowerPort, "serial")
+		strings.Contains(lowerPort, "serial") ||
+		strings.HasPrefix(lowerPort, "/dev/cu.")
 }
 
 func getPortDescription(port string) string {

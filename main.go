@@ -94,7 +94,7 @@ func main() {
 	if disableTray {
 		log.Println("System tray disabled, running in headless mode")
 		showNotification("Care Scanner Bridge", fmt.Sprintf("Running in headless mode on port %d", cfg.Port))
-		
+
 		// Block on signal in headless mode
 		<-sigChan
 		log.Println("Shutting down...")

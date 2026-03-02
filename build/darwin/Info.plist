@@ -26,5 +26,11 @@
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2024 Open Healthcare Network. All rights reserved.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Care Scanner Bridge needs to send notifications about scanner status.</string>
 </dict>
 </plist>

@@ -4,8 +4,12 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/ohcnetwork/care_scanner_bridge/internal/config"
@@ -19,11 +23,16 @@ var (
 	scannerManager *scanner.Manager
 	cfg            *config.Config
 
-	mStatus      *systray.MenuItem
-	mConnect     *systray.MenuItem
-	mDisconnect  *systray.MenuItem
-	mPortsMenu   *systray.MenuItem
-	portItems    []*systray.MenuItem
+	mStatus        *systray.MenuItem
+	mPairedDevice  *systray.MenuItem
+	mConnect       *systray.MenuItem
+	mDisconnect    *systray.MenuItem
+	mForget        *systray.MenuItem
+	mPortsMenu     *systray.MenuItem
+	mStartAtLogin  *systray.MenuItem
+	portItems      []*systray.MenuItem
+
+	stopReconnect chan struct{}
 )
 
 // Run starts the system tray application
@@ -52,18 +61,25 @@ func onReady() {
 	mStatus = systray.AddMenuItem("Status: Disconnected", "Current connection status")
 	mStatus.Disable()
 
+	// Paired device info
+	mPairedDevice = systray.AddMenuItem("No paired device", "Currently paired scanner")
+	mPairedDevice.Disable()
+
 	systray.AddSeparator()
 
 	// Ports submenu
 	mPortsMenu = systray.AddMenuItem("Select Port", "Available serial ports")
-	refreshPorts()
 
 	systray.AddSeparator()
 
-	// Connect/Disconnect
-	mConnect = systray.AddMenuItem("Connect", "Connect to scanner")
+	// Connect/Disconnect/Forget
+	mConnect = systray.AddMenuItem("Connect", "Connect to paired scanner")
 	mDisconnect = systray.AddMenuItem("Disconnect", "Disconnect from scanner")
 	mDisconnect.Disable()
+	mForget = systray.AddMenuItem("Forget Device", "Remove paired device")
+	if cfg.LastDevice == "" {
+		mForget.Disable()
+	}
 
 	systray.AddSeparator()
 
@@ -81,8 +97,21 @@ func onReady() {
 
 	systray.AddSeparator()
 
+	// Start at Login (macOS only)
+	if runtime.GOOS == "darwin" {
+		mStartAtLogin = systray.AddMenuItem("Start at Login", "Launch automatically when you log in")
+		if isStartAtLoginEnabled() {
+			mStartAtLogin.Check()
+		}
+		systray.AddSeparator()
+	}
+
 	// Quit
 	mQuit := systray.AddMenuItem("Quit", "Quit the application")
+
+	// Initialize display after all menu items are created
+	updatePairedDeviceDisplay()
+	refreshPorts()
 
 	// Handle menu clicks
 	go func() {
@@ -92,10 +121,12 @@ func onReady() {
 				handleConnect()
 			case <-mDisconnect.ClickedCh:
 				handleDisconnect()
+			case <-mForget.ClickedCh:
+				handleForgetDevice()
 			case <-mRefresh.ClickedCh:
 				refreshPorts()
 			case <-mOpenBrowser.ClickedCh:
-				openBrowser(fmt.Sprintf("http://localhost:%d/health", wsServer.GetPort()))
+				openBrowser(fmt.Sprintf("http://localhost:%d", wsServer.GetPort()))
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 				return
@@ -103,21 +134,109 @@ func onReady() {
 		}
 	}()
 
-	// Auto-connect if configured
-	if cfg.AutoConnect && cfg.LastDevice != "" {
+	// Handle Start at Login clicks (separate goroutine for macOS)
+	if runtime.GOOS == "darwin" && mStartAtLogin != nil {
 		go func() {
-			if err := scannerManager.Connect(cfg.LastDevice, cfg.BaudRate); err != nil {
-				log.Printf("Auto-connect failed: %v", err)
-			} else {
-				updateStatus()
+			for range mStartAtLogin.ClickedCh {
+				toggleStartAtLogin()
 			}
 		}()
+	}
+
+	// Auto-connect to paired device if configured
+	if cfg.AutoConnect && cfg.LastDevice != "" {
+		go autoConnectWithRetry()
 	}
 }
 
 func onExit() {
+	// Stop reconnection attempts
+	if stopReconnect != nil {
+		close(stopReconnect)
+	}
 	scannerManager.Disconnect()
 	log.Println("System tray exiting")
+}
+
+// autoConnectWithRetry attempts to connect to the paired device with retries
+func autoConnectWithRetry() {
+	stopReconnect = make(chan struct{})
+	maxRetries := 5
+	retryDelay := 2 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-stopReconnect:
+			return
+		default:
+		}
+
+		if cfg.LastDevice == "" {
+			return
+		}
+
+		log.Printf("Auto-connect attempt %d/%d to %s", i+1, maxRetries, cfg.LastDevice)
+
+		if err := scannerManager.Connect(cfg.LastDevice, cfg.BaudRate); err != nil {
+			log.Printf("Auto-connect failed: %v", err)
+
+			if i < maxRetries-1 {
+				select {
+				case <-stopReconnect:
+					return
+				case <-time.After(retryDelay):
+					// Refresh ports in case device was just plugged in
+					refreshPorts()
+				}
+			}
+		} else {
+			log.Printf("Auto-connected to paired device: %s", cfg.LastDevice)
+			updateStatus()
+			return
+		}
+	}
+
+	log.Printf("Failed to auto-connect after %d attempts", maxRetries)
+}
+
+// updatePairedDeviceDisplay updates the paired device menu item
+func updatePairedDeviceDisplay() {
+	if mPairedDevice == nil {
+		return // Menu not initialized yet
+	}
+
+	if cfg.LastDevice != "" {
+		// Show shortened device name
+		deviceName := cfg.LastDevice
+		if len(deviceName) > 30 {
+			deviceName = "..." + deviceName[len(deviceName)-27:]
+		}
+		mPairedDevice.SetTitle(fmt.Sprintf("📱 Paired: %s", deviceName))
+		if mForget != nil {
+			mForget.Enable()
+		}
+	} else {
+		mPairedDevice.SetTitle("No paired device")
+		if mForget != nil {
+			mForget.Disable()
+		}
+	}
+}
+
+// handleForgetDevice removes the paired device
+func handleForgetDevice() {
+	cfg.LastDevice = ""
+	cfg.Save()
+
+	// Disconnect if currently connected
+	if scannerManager.IsConnected() {
+		scannerManager.Disconnect()
+	}
+
+	updatePairedDeviceDisplay()
+	updateStatus()
+	refreshPorts()
+	log.Println("Paired device forgotten")
 }
 
 func refreshPorts() {
@@ -127,11 +246,11 @@ func refreshPorts() {
 		return
 	}
 
-	// Clear existing port items
+	// Clear existing port items - hide them
 	for _, item := range portItems {
 		item.Hide()
 	}
-	portItems = nil
+	portItems = portItems[:0] // Reset slice but keep capacity
 
 	if len(ports) == 0 {
 		mPortsMenu.SetTitle("No ports found")
@@ -142,21 +261,43 @@ func refreshPorts() {
 
 	// Add port items
 	for _, port := range ports {
-		item := mPortsMenu.AddSubMenuItem(port.Path, port.Description)
+		displayName := port.Path
+		if port.Description != "" {
+			displayName = fmt.Sprintf("%s - %s", port.Path, port.Description)
+		}
+
+		// Show indicators for paired and connected status
+		isPaired := port.Path == cfg.LastDevice
+		if port.IsConnected {
+			displayName = "✓ " + displayName + " (connected)"
+		} else if isPaired {
+			displayName = "📱 " + displayName + " (paired)"
+		}
+
+		item := mPortsMenu.AddSubMenuItem(displayName, fmt.Sprintf("Connect to %s", port.Path))
 		portItems = append(portItems, item)
 
-		// Handle port selection
-		go func(p scanner.PortInfo, menuItem *systray.MenuItem) {
+		// Handle port selection in a separate goroutine
+		portPath := port.Path // Capture the value
+		go func(menuItem *systray.MenuItem, path string) {
 			for range menuItem.ClickedCh {
-				cfg.LastDevice = p.Path
+				log.Printf("Port selected and paired: %s", path)
+
+				// Save as paired device
+				cfg.LastDevice = path
 				cfg.Save()
-				if err := scannerManager.Connect(p.Path, cfg.BaudRate); err != nil {
-					log.Printf("Failed to connect to %s: %v", p.Path, err)
+				updatePairedDeviceDisplay()
+
+				// Connect to the device
+				if err := scannerManager.Connect(path, cfg.BaudRate); err != nil {
+					log.Printf("Failed to connect to %s: %v", path, err)
 				} else {
+					log.Printf("Successfully connected and paired to %s", path)
 					updateStatus()
 				}
+				refreshPorts() // Refresh to show updated status
 			}
-		}(port, item)
+		}(item, portPath)
 	}
 }
 
@@ -210,4 +351,91 @@ func openBrowser(url string) {
 	if cmd != nil {
 		cmd.Start()
 	}
+}
+
+// Start at Login functions for macOS
+func getLoginItemPlistPath() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, "Library", "LaunchAgents", "com.ohcnetwork.care-scanner-bridge.plist")
+}
+
+func isStartAtLoginEnabled() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	plistPath := getLoginItemPlistPath()
+	_, err := os.Stat(plistPath)
+	return err == nil
+}
+
+func toggleStartAtLogin() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+
+	if isStartAtLoginEnabled() {
+		// Disable - remove the plist
+		plistPath := getLoginItemPlistPath()
+		if err := os.Remove(plistPath); err != nil {
+			log.Printf("Failed to remove login item: %v", err)
+		} else {
+			log.Println("Disabled start at login")
+			mStartAtLogin.Uncheck()
+		}
+	} else {
+		// Enable - create the plist
+		if err := createLoginItemPlist(); err != nil {
+			log.Printf("Failed to create login item: %v", err)
+		} else {
+			log.Println("Enabled start at login")
+			mStartAtLogin.Check()
+		}
+	}
+}
+
+func createLoginItemPlist() error {
+	// Get the path to the running executable or app bundle
+	execPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	// If running from an app bundle, use the bundle path
+	// The executable is at AppName.app/Contents/MacOS/executable
+	appPath := execPath
+	if idx := strings.Index(execPath, ".app/Contents/MacOS"); idx != -1 {
+		appPath = execPath[:idx+4] // Include ".app"
+	}
+
+	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ohcnetwork.care-scanner-bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardErrorPath</key>
+    <string>/tmp/care-scanner-bridge.err</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/care-scanner-bridge.out</string>
+</dict>
+</plist>
+`, appPath)
+
+	plistPath := getLoginItemPlistPath()
+
+	// Ensure LaunchAgents directory exists
+	launchAgentsDir := filepath.Dir(plistPath)
+	if err := os.MkdirAll(launchAgentsDir, 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(plistPath, []byte(plistContent), 0644)
 }
